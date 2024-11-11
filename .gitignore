@@ -1,0 +1,5 @@
+/.nimcache
+/.idea
+*.elf
+*.hex
+*.bin
