@@ -4,8 +4,9 @@ import avr_io
 
 
 const
-  buttonPin = 0 # PIN8 => PORTB[0]
-  tim2Out   = 1 # PIN3 => PORTD[3]
+  buttonUpPin   = 0 # PIN8 => PORTB[0]
+  tim2Out       = 1 # PIN3 => PORTD[3]
+  buttonDownPin = 2 # PIN3 => PORTD[3]
 
 
 type PwmState = enum
@@ -18,8 +19,20 @@ type PwmState = enum
   Pwm80DT50Hz
 
 
-proc delayMs(ms: uint16) {.importc: "_delay_ms", header: "util/delay.h"}
+proc `inc`(p: var PwmState) =
+  if p == PwmState.high:
+    p = PwmState.low
+    return
+  p = cast[PwmState](p.ord + 1)
 
+
+proc `dec`(p: var PwmState) =
+  if p == PwmState.low:
+    p = PwmState.high
+  p = cast[PwmState](p.ord - 1)
+
+
+proc delayMs(ms: uint16) {.importc: "_delay_ms", header: "util/delay.h"}
 
 proc readDebounced(p: Port, pin: uint8): uint8 =
   const debounceResolution = 8
@@ -28,7 +41,7 @@ proc readDebounced(p: Port, pin: uint8): uint8 =
   while true:
     var counter = 0
     while counter < debounceResolution:
-      accumulator = (accumulator shl 1) or (portB.readPin buttonPin)
+      accumulator = (accumulator shl 1) or (p.readPin pin)
       delayMs 1
       inc counter
     if accumulator == 0x00 or accumulator == 0xff:
@@ -57,43 +70,49 @@ proc setPwmHandle   {.isr(Timer1CompAVect).} = portB.setPin(tim2Out)
 proc clearPwmHandle {.isr(Timer1CompBVect).} = portB.clearPin(tim2Out)
 
 
+template actuatePwm(state: PwmState) =
+  case state
+  of Pwm50DT1Hz:
+    timer1.setPwm(1, 50)
+  of Pwm20DT1Hz:
+    timer1.setPwm(1, 20)
+  of Pwm80DT1Hz:
+    timer1.setPwm(1, 80)
+  of Pwm50DT10Hz:
+    timer1.setPwm(10, 50)
+  of Pwm50DT50Hz:
+    timer1.setPwm(50, 50)
+  of Pwm20DT50Hz:
+    timer1.setPwm(50, 20)
+  of Pwm80DT50Hz:
+    timer1.setPwm(50, 80)
+
+
 proc loop =
   portB.asOutputPin(tim2Out)
-  portB.asInputPullupPin(buttonPin)
+  portB.asInputPullupPin(buttonUpPin)
+  portB.asInputPullupPin(buttonDownPin)
   initPwmTimer1()
-
   sei()
 
   var
     state = Pwm50DT1Hz
-    buttonState = false
+    buttonStateUp   = false
+    buttonStateDown = false
 
   while true:
-    let pressed = portB.readDebounced(buttonPin) == 0x00
+    let pressedUp   = portB.readDebounced(buttonUpPin) == 0x00
+    let pressedDown = portB.readDebounced(buttonDownPin) == 0x00
 
-    if pressed and pressed != buttonState:
-      if state == PwmState.high:
-        state = PwmState.low
-      else:
-        inc state
+    if pressedUp and pressedUp != buttonStateUp:
+      inc state
+      actuatePwm state
 
-      case state
-      of Pwm50DT1Hz:
-        timer1.setPwm(1, 50)
-      of Pwm20DT1Hz:
-        timer1.setPwm(1, 20)
-      of Pwm80DT1Hz:
-        timer1.setPwm(1, 80)
-      of Pwm50DT10Hz:
-        timer1.setPwm(10, 50)
-      of Pwm50DT50Hz:
-        timer1.setPwm(50, 50)
-      of Pwm20DT50Hz:
-        timer1.setPwm(50, 20)
-      of Pwm80DT50Hz:
-        timer1.setPwm(50, 80)
+    if pressedDown and pressedDown != buttonStateDown:
+      dec state
+      actuatePwm state
 
-    buttonState = pressed
-
+    buttonStateUp = pressedUp
+    buttonStateDown = pressedDown
 
 loop()
